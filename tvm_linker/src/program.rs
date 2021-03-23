@@ -219,7 +219,7 @@ impl Program {
         Ok(state)
     }
 
-    fn compile_asm(&mut self, remove_ctor: bool) -> std::result::Result<Cell, String> {
+    fn compile_asm_old(&mut self, remove_ctor: bool) -> std::result::Result<Cell, String> {
         let internal_selector_text = vec![
             Line::new("DICTPUSHCONST 32\n", "<internal-selector>", 1),
             Line::new("DICTUGETJMP\n",      "<internal-selector>", 2),
@@ -247,6 +247,91 @@ impl Program {
         self.dbgmap.map.insert(hash, entry.1.clone());
 
         Ok(main_selector.0.cell().clone())
+    }
+
+    fn compile_asm(&mut self, remove_ctor: bool) -> std::result::Result<Cell, String> {
+        if !self.entry().is_empty() {
+            // TODO wipe out the old behavior
+            return self.compile_asm_old(remove_ctor);
+        }
+
+        let internal_selector_text = vec![
+            // this is a workaround, the compiler should be modified instead
+            Line::new("DUP\n",              "<internal-selector>", 1),
+            Line::new("EQINT 1\n",          "<internal-selector>", 1),
+            Line::new("PUSHCONT {\n",       "<internal-selector>", 1),
+            Line::new("  DROP\n",           "<internal-selector>", 1),
+            Line::new("}\n",                "<internal-selector>", 1),
+            Line::new("IF\n",               "<internal-selector>", 1),
+            // indirect jump
+            Line::new("DICTPUSHCONST 32\n", "<internal-selector>", 1),
+            Line::new("DICTUGETJMP\n",      "<internal-selector>", 2),
+        ];
+
+        let mut internal_selector = compile_code_debuggable(internal_selector_text)
+            .map_err(|_| "unexpected TVM error while compiling internal selector".to_string())?;
+
+        let mut dict = prepare_methods(&self.engine.privates())
+            .map_err(|e| e.1.replace("_name_", &self.engine.global_name(e.0).unwrap()))?;
+
+        insert_methods(&mut dict.0, &mut dict.1, &self.engine.internals())
+            .map_err(|e| e.1.replace("_name_", &self.engine.internal_name(e.0).unwrap()) )?;
+
+        insert_methods(&mut dict.0, &mut dict.1, &self.publics_filtered(remove_ctor))
+            .map_err(|e| e.1.replace("_name_", &self.engine.global_name(e.0).unwrap()) )?;
+
+        let mut entry_points = vec![];
+        for id in -2..1 {
+            let key = id.write_to_new_cell().unwrap().into();
+            let value = dict.0.remove(key).unwrap();
+            entry_points.push(value.unwrap_or(SliceData::default()));
+        }
+
+        internal_selector.0.append_reference(SliceData::from(dict.0.data().unwrap()));
+        self.dbgmap.map.append(&mut dict.1.map.clone());
+
+        // adjust hash of internal_selector cell
+        let hash = internal_selector.0.cell().repr_hash().to_hex_string();
+        assert!(internal_selector.1.map.len() == 1);
+        let entry = internal_selector.1.map.iter().next().unwrap();
+        self.dbgmap.map.insert(hash, entry.1.clone());
+
+        let entry_selector_text = vec![
+            Line::new("SETCP 0\n",          "<entry-selector>", 1),
+            // check the value on top of the stack is -2, -1, or 0
+            //
+            // a node has already checked the range, hopefully;
+            // is the check here redundant?
+            Line::new("DUP\n",              "<entry-selector>", 2),
+            Line::new("LESSINT -2\n",       "<entry-selector>", 3),
+            Line::new("OVER\n",             "<entry-selector>", 4),
+            Line::new("GTINT 0\n",          "<entry-selector>", 5),
+            Line::new("OR\n",               "<entry-selector>", 6),
+            Line::new("THROWIF 11\n",       "<entry-selector>", 7),
+            // set c3 (current dictionary) to internal selector
+            Line::new("PUSHREFCONT\n",      "<entry-selector>", 8),
+            Line::new("POPCTR c3\n",        "<entry-selector>", 9),
+            // jump to an entry point according to the jump table
+            Line::new("IFNBITJMPREF 1\n",   "<entry-selector>", 10), //  0 = 0...0000, jump to  <0> if bit 1 is zero
+            Line::new("IFBITJMPREF 0\n",    "<entry-selector>", 11), // -1 = 1...1111, jump to <-1> if bit 0 is one
+            Line::new("JMPREF\n",           "<entry-selector>", 12), // -2 = 1...1110, jump to <-2> otherwise
+        ];
+        let mut entry_selector = compile_code_debuggable(entry_selector_text.clone())
+            .map_err(|e| format_compilation_error_string(e, &entry_selector_text).replace("_name_", "selector"))?;
+
+        entry_selector.0.append_reference(internal_selector.0);
+        entry_points.reverse();
+        for entry in entry_points {
+            entry_selector.0.append_reference(entry);
+        }
+
+        // adjust hash of entry_selector cell
+        let hash = entry_selector.0.cell().repr_hash().to_hex_string();
+        assert!(entry_selector.1.map.len() == 1);
+        let entry = entry_selector.1.map.iter().next().unwrap();
+        self.dbgmap.map.insert(hash, entry.1.clone());
+
+        Ok(entry_selector.0.cell().clone())
     }
 
     pub fn debug_print(&self) {
