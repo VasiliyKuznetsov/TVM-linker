@@ -287,7 +287,7 @@ impl Program {
             entry_points.push(value.unwrap_or(SliceData::default()));
         }
 
-        internal_selector.0.append_reference(SliceData::from(dict.0.data().unwrap()));
+        internal_selector.0.append_reference(SliceData::from(dict.0.data().unwrap_or(&Cell::default())));
         self.dbgmap.map.append(&mut dict.1.map.clone());
 
         // adjust hash of internal_selector cell
