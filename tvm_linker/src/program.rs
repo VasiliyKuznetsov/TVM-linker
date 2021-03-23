@@ -231,7 +231,7 @@ impl Program {
 
         // adjust hash of internal_selector cell
         let hash = internal_selector.0.cell().repr_hash().to_hex_string();
-        assert!(internal_selector.1.map.len() == 1);
+        assert_eq!(internal_selector.1.map.len(), 1);
         let entry = internal_selector.1.map.iter().next().unwrap();
         self.dbgmap.map.insert(hash, entry.1.clone());
 
@@ -242,7 +242,7 @@ impl Program {
 
         // adjust hash of main_selector cell
         let hash = main_selector.0.cell().repr_hash().to_hex_string();
-        assert!(main_selector.1.map.len() == 1);
+        assert_eq!(main_selector.1.map.len(), 1);
         let entry = main_selector.1.map.iter().next().unwrap();
         self.dbgmap.map.insert(hash, entry.1.clone());
 
@@ -256,14 +256,6 @@ impl Program {
         }
 
         let internal_selector_text = vec![
-            // this is a workaround, the compiler should be modified instead
-            Line::new("DUP\n",              "<internal-selector>", 1),
-            Line::new("EQINT 1\n",          "<internal-selector>", 1),
-            Line::new("PUSHCONT {\n",       "<internal-selector>", 1),
-            Line::new("  DROP\n",           "<internal-selector>", 1),
-            Line::new("}\n",                "<internal-selector>", 1),
-            Line::new("IF\n",               "<internal-selector>", 1),
-            // indirect jump
             Line::new("DICTPUSHCONST 32\n", "<internal-selector>", 1),
             Line::new("DICTUGETJMP\n",      "<internal-selector>", 2),
         ];
@@ -292,30 +284,30 @@ impl Program {
 
         // adjust hash of internal_selector cell
         let hash = internal_selector.0.cell().repr_hash().to_hex_string();
-        assert!(internal_selector.1.map.len() == 1);
+        assert_eq!(internal_selector.1.map.len(), 1);
         let entry = internal_selector.1.map.iter().next().unwrap();
         self.dbgmap.map.insert(hash, entry.1.clone());
 
         let entry_selector_text = vec![
-            Line::new("SETCP 0\n",          "<entry-selector>", 1),
-            // check the value on top of the stack is -2, -1, or 0
-            //
-            // a node has already checked the range, hopefully;
-            // is the check here redundant?
-            Line::new("DUP\n",              "<entry-selector>", 2),
-            Line::new("LESSINT -2\n",       "<entry-selector>", 3),
-            Line::new("OVER\n",             "<entry-selector>", 4),
-            Line::new("GTINT 0\n",          "<entry-selector>", 5),
-            Line::new("OR\n",               "<entry-selector>", 6),
-            Line::new("THROWIF 11\n",       "<entry-selector>", 7),
-            // set c3 (current dictionary) to internal selector
-            Line::new("PUSHREFCONT\n",      "<entry-selector>", 8),
-            Line::new("POPCTR c3\n",        "<entry-selector>", 9),
-            // jump to an entry point according to the jump table
-            Line::new("IFNBITJMPREF 1\n",   "<entry-selector>", 10), //  0 = 0...0000, jump to  <0> if bit 1 is zero
-            Line::new("IFBITJMPREF 0\n",    "<entry-selector>", 11), // -1 = 1...1111, jump to <-1> if bit 0 is one
-            Line::new("JMPREF\n",           "<entry-selector>", 12), // -2 = 1...1110, jump to <-2> otherwise
+            Line::new("SETCP 0\n", "<entry-selector>", 1),
+
+            Line::new("PUSHREFCONT\n", "<entry-selector>", 2),
+            Line::new("POPCTR c3\n", "<entry-selector>", 3),
+
+            Line::new("DUP\n", "<entry-selector>", 4),
+            Line::new("IFNOTJMPREF\n", "<entry-selector>", 5), // main_internal
+
+            Line::new("DUP\n", "<entry-selector>", 6),
+            Line::new("EQINT -1\n", "<entry-selector>", 7), // main_external
+            Line::new("IFJMPREF\n", "<entry-selector>", 8),
+
+            Line::new("DUP\n", "<entry-selector>", 9),
+            Line::new("EQINT -2\n", "<entry-selector>", 10), // onTickTock
+
+            Line::new("IFJMPREF\n", "<entry-selector>", 11),
+            Line::new("THROW 11\n", "<entry-selector>", 12),
         ];
+
         let mut entry_selector = compile_code_debuggable(entry_selector_text.clone())
             .map_err(|e| format_compilation_error_string(e, &entry_selector_text).replace("_name_", "selector"))?;
 
@@ -327,7 +319,7 @@ impl Program {
 
         // adjust hash of entry_selector cell
         let hash = entry_selector.0.cell().repr_hash().to_hex_string();
-        assert!(entry_selector.1.map.len() == 1);
+        assert_eq!(entry_selector.1.map.len(), 1);
         let entry = entry_selector.1.map.iter().next().unwrap();
         self.dbgmap.map.insert(hash, entry.1.clone());
 
@@ -536,7 +528,7 @@ mod tests {
             b.append_reference(BuilderData::new());
             Some(b.into())
         };
-        assert!(perform_contract_call(name, body2, None, false, false, None, None, None, None, 0, |_b,_i| {}) != 0);
+        assert_ne!(perform_contract_call(name, body2, None, false, false, None, None, None, None, 0, |_b, _i| {}), 0);
 
         let body3 = {
             let mut b = BuilderData::new();

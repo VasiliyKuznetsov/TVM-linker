@@ -58,42 +58,19 @@ pub fn load_debug_info(
 
     let debug_info_str = std::fs::read_to_string(filename);
     if debug_info_str.is_err() {
-        return Some(ContractDebugInfo { hash2function: hash2function, map: debug_map });
+        return Some(ContractDebugInfo { hash2function, map: debug_map });
     }
     let debug_info_json : DebugInfo = serde_json::from_str(&debug_info_str.unwrap()).unwrap();
 
     // println!("{:?}", debug_info_json);
 
     let root_cell = state_init.code.as_ref().unwrap();
-    let dict1 = HashmapE::with_hashmap(32, Some(root_cell.reference(0).unwrap()));
-    let dict2 = HashmapE::with_hashmap(32, Some(root_cell.reference(1).unwrap().reference(0).unwrap()));
-
-    for func in debug_info_json.internals.iter() {
-        let id = func.id as i32;
-        let key = id.clone().write_to_new_cell().unwrap().into();
-        let val = dict1.get(key).unwrap();
-        if val.is_some() {
-            let val = val.unwrap();
-            let hash = val.cell().repr_hash();
-            hash2function.insert(hash, func.name.clone());
-        }
-    }
-    
-    for func in debug_info_json.publics.iter() {
-        let id = &(func.id as u32);
-        let key = id.clone().write_to_new_cell().unwrap().into();
-        let val = dict1.get(key).unwrap();
-        if val.is_some() {
-            let val = val.unwrap();
-            let hash = val.cell().repr_hash();
-            hash2function.insert(hash, func.name.clone());
-        }
-    }
+    let priv_func_dict = HashmapE::with_hashmap(32, Some(root_cell.reference(0).unwrap().reference(0).unwrap()));
 
     for func in debug_info_json.privates.iter() {
         let id = &(func.id as u32);
         let key = id.clone().write_to_new_cell().unwrap().into();
-        let val = dict2.get(key).unwrap();
+        let val = priv_func_dict.get(key).unwrap();
         if val.is_some() {
             let val = val.unwrap();
             let hash = val.cell().repr_hash();
@@ -103,6 +80,6 @@ pub fn load_debug_info(
 
     hash2function.insert(root_cell.repr_hash(), "selector".to_owned());
 
-    Some(ContractDebugInfo { hash2function: hash2function, map: debug_map })
+    Some(ContractDebugInfo { hash2function, map: debug_map })
 }
 
